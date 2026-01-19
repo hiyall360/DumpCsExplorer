@@ -88,7 +88,10 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
-- Then run (change path obviously) ```PATH\TO\QT\mingw_64\bin\windeployqt.exe --release --no-translations --no-system-d3d-compiler DumpCsExplorer.exe```
+- Then run (change path):
+```bash
+PATH\TO\QT\mingw_64\bin\windeployqt.exe --release --no-translations --no-system-d3d-compiler DumpCsExplorer.exe
+```
 
 ### Run
 Open the built executable, then:

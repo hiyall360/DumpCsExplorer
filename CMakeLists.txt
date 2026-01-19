@@ -20,3 +20,29 @@ add_executable(DumpCsExplorer
 
 target_include_directories(DumpCsExplorer PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(DumpCsExplorer PRIVATE Qt6::Widgets Qt6::Concurrent)
+
+if (WIN32)
+	set_target_properties(DumpCsExplorer PROPERTIES WIN32_EXECUTABLE TRUE)
+	if (TARGET Qt6::WinMain)
+		target_link_libraries(DumpCsExplorer PRIVATE Qt6::WinMain)
+	elseif (TARGET Qt6::EntryPoint)
+		target_link_libraries(DumpCsExplorer PRIVATE Qt6::EntryPoint)
+	endif()
+
+	set(_ICON_FILE "")
+	foreach(_cand
+			"${CMAKE_SOURCE_DIR}/Icon.ico"
+	)
+		if (EXISTS "${_cand}")
+			set(_ICON_FILE "${_cand}")
+			break()
+		endif()
+	endforeach()
+
+	if (_ICON_FILE)
+		file(TO_NATIVE_PATH "${_ICON_FILE}" _ICON_FILE_NATIVE)
+		set(_RC_FILE "${CMAKE_CURRENT_BINARY_DIR}/DumpCsExplorerIcon.rc")
+		file(WRITE "${_RC_FILE}" "IDI_ICON1 ICON \"${_ICON_FILE_NATIVE}\"\n")
+		target_sources(DumpCsExplorer PRIVATE "${_RC_FILE}")
+	endif()
+endif()

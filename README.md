@@ -1,78 +1,65 @@
-# DumpCsExplorer
+﻿# DumpCsExplorer
 
-A DnSpy-style explorer for `dump.cs` files (produced by an IL2CPP Dumper). Stop navigating dumps using notepad.
+A DnSpy-style explorer for IL2CPP Dumper `dump.cs` files. No DummyDLLs? No Problem.
 
-It’s built for reverse engineering and modding workflows where you need to:
-- Browse namespaces/types/members quickly
-- Search across large dumps
-- Copy RVA/VA/offset values
-- Compare two dumps to update offsets between versions and check for changes
+- Browse dump.cs files more efficiently
+- Customizable hook snippet generator
+- Copy Offsets
+- Compare two dumps between versions and export diffs
+- Favorites
+- More info below
 
 
 ## Screenshots
 
-### Welcome screen
+### Explorer (tree + details + search results + hook snippet generation)
 
-![Welcome screen](docs/screenshots/welcome.png)
+<img src="docs/screenshots/explorer.png" alt="Explorer" width="700" />
 
-### Explorer (tree + details + search results)
+### Snippet Generator Template Manager
 
-![Explorer](docs/screenshots/explorer.png)
+<img src="docs/screenshots/snippet.png" alt="Templates" width="700" />
 
-### Compare / Diff dialog
+### Compare / Diff
 
-![Diff (Removed)](docs/screenshots/diff-removed.png)
-
-![Diff (Changed)](docs/screenshots/diff-changed.png)
-
-![Diff (Added)](docs/screenshots/diff-added.png)
-
+<img src="docs/screenshots/diff1.png" alt="Diff (Removed)" width="700" />
+<img src="docs/screenshots/diff2.png" alt="Diff2 (Removed)" width="700" />
 
 ## Features
 
 ### Explorer tree
-- Namespace → Type → Member hierarchy.
-- Type nodes expand into member groups (Constructors/Methods/Properties/Fields/Events/Enums).
-- Lazy-loading keeps the UI responsive on large dumps.
+- Organized as **Assembly → Namespace → Type → Members**.
+- Type nodes expand into grouped members (Constructors/Methods/Properties/Fields/Events/Enums).
 
-### Member details pane
-- Selecting any item updates the details pane.
-- Shows the parsed signature/details for the selected entry.
+### Details panel (Summary + Raw)
+- Selecting any node updates the details panel.
+- **Summary** shows structured fields (assembly/namespace/type/member metadata).
+- **Raw** shows the original dump text from the selection.
+- Copy helpers: **RVA**, **Offset**, **VA**, **Snippet**.
+- Export selection to **JSON** / **CSV** (type or member).
 
-### Copy helpers
-- Double-click a member to copy:
-  - Offset (preferred when present)
-  - otherwise VA
-- Right-click context menu for:
-  - Copy Signature
-  - Copy RVA
-  - Copy Offset
-  - Copy VA
+### Search (fast + scoped)
+- Bottom-right results panel with:
+  - Query box with debounced, non-blocking filtering
+  - Kind filters (Namespace/Type/Members)
+  - Optional scope (All / Selected Assembly / Selected Namespace / Selected Type)
+- Results **highlight matched substrings**.
+- Click a result to navigate to the tree item.
 
-### Search
-- Search/filter within the tree.
-- Dedicated results panel with:
-  - Query box
-  - Kind filters (Namespace/Type/Method/Ctor/Field/Property/Event/Enum)
-  - Click a result to navigate to the matching tree item
+### Snippets (Generate BNM/Frida-style hooks, or Customize it)
+- Right-click members and **Generate Snippet**.
+- Template system with placeholders (e.g. `${assemblyName}`, `${namespace}`, `${className}`, `${methodName}`, `${parameterCount}`).
+- Manage multiple templates, pick a default, and preview output.
 
-### Syntax highlighting (signatures)
-Signatures rendered in the tree and results list are token-highlighted:
-- Modifiers (public/private/static/etc.)
-- Primitive types (int/bool/string/etc.)
-- Literals (true/false/null)
-- Numbers (decimal + hex)
+### Favorites
+- Right-click a type/member and **Add to Favorites**.
+- Favorites panel lets you jump back to frequently used targets.
 
 ### Compare / Diff (two dumps)
-After loading a primary dump, you can optionally load a second dump to compare against:
-- Added members
-- Removed members
-- Changed members (offset changed)
-
-Diff results include:
-- Status filter checkboxes (Added/Changed/Removed)
-- Text filter
-
+- Detects changes in **Signatures**, **Offset**, **RVA**, and **VA**.
+- Grouped results tree: **Assembly → Type → Entries**.
+- Filter by status + text search.
+- Export visible diffs to **JSON** / **CSV**.
 
 ## Building
 
@@ -111,3 +98,9 @@ Open the built executable, then:
 
 - This tool does **not** generate dumps. It assumes you already have `dump.cs`.
 - Intended for large files: lazy-loading + lightweight indexing to keep interactions snappy.
+
+## Settings / config
+
+Settings (templates, UI state, recent files, favorites) are stored via `QSettings` in the per-user app config location:
+
+`AppData/Local/DumpCsExplorer/DumpCsExplorer.ini`

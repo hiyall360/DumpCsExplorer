@@ -33,6 +33,8 @@ struct DumpMember {
 struct DumpType {
     std::string name;
     std::string nameSpace;
+    int typeDefIndex = -1;
+    std::string assembly;
     bool isEnum = false;
 
     std::vector<DumpMember> members;

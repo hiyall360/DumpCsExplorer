@@ -43,11 +43,19 @@ std::vector<DumpType> DumpCsParser::parse(const std::string& path) {
     DumpType* currentType = nullptr;
     std::string section;
 
+    struct ImageMapEntry {
+        int baseTypeDefIndex = -1;
+        std::string assembly;
+    };
+    std::vector<ImageMapEntry> images;
+
     bool hasPending = false;
     uint64_t pendingRva = 0, pendingOff = 0, pendingVa = 0;
 
+    std::regex rxImage(R"(//\s*Image\s+\d+:\s*(.+?)\s*-\s*(\d+)\s*)");
     std::regex rxNamespace(R"(//\s*Namespace:\s*(.*))");
     std::regex rxType(R"((class|struct|enum|interface)\s+([^\s:{]+))");
+    std::regex rxTypeDefIndex(R"(TypeDefIndex:\s*(\d+))");
     std::regex rxSection(R"(//\s*(Methods|Fields|Properties|Events))");
 
     std::regex rxRva(R"(RVA:\s*0x([0-9A-Fa-f]+))");
@@ -74,9 +82,17 @@ std::vector<DumpType> DumpCsParser::parse(const std::string& path) {
         std::string s = trim(line);
         std::smatch m;
 
+        if (std::regex_search(s, m, rxImage)) {
+            ImageMapEntry e;
+            e.assembly = trim(m[1].str());
+            e.baseTypeDefIndex = std::stoi(m[2].str());
+            images.push_back(std::move(e));
+            continue;
+        }
+
         if (std::regex_search(s, m, rxNamespace)) {
             currentNs = m[1].str();
-            if (currentNs.empty()) currentNs = "(global)";
+            if (currentNs.empty()) currentNs = "-";
             continue;
         }
 
@@ -84,8 +100,24 @@ std::vector<DumpType> DumpCsParser::parse(const std::string& path) {
             out.push_back({});
             currentType = &out.back();
             currentType->name = m[2];
-            currentType->nameSpace = currentNs.empty() ? "(global)" : currentNs;
+            currentType->nameSpace = currentNs.empty() ? "-" : currentNs;
             currentType->isEnum = (m[1] == "enum");
+
+            std::smatch mt;
+            if (std::regex_search(s, mt, rxTypeDefIndex)) {
+                currentType->typeDefIndex = std::stoi(mt[1].str());
+
+                std::string asmName;
+                int bestBase = -1;
+                for (const auto& img : images) {
+                    if (img.baseTypeDefIndex <= currentType->typeDefIndex && img.baseTypeDefIndex >= bestBase) {
+                        bestBase = img.baseTypeDefIndex;
+                        asmName = img.assembly;
+                    }
+                }
+                currentType->assembly = std::move(asmName);
+            }
+
             section.clear();
             hasPending = false;
             continue;

@@ -2,6 +2,8 @@
 
 #include <QMainWindow>
 #include <QIcon>
+#include <QMap>
+#include <QSet>
 #include <vector>
 #include <map>
 
@@ -20,7 +22,12 @@ class QProgressBar;
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
+class QTimer;
 class QCheckBox;
+class QTabWidget;
+class QComboBox;
+class QSplitter;
+class QCloseEvent;
 
 template <typename T> class QFutureWatcher;
 
@@ -29,6 +36,9 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+protected:
+    void closeEvent(QCloseEvent* e) override;
 
 private slots:
     void openDumpCs();
@@ -41,11 +51,20 @@ private:
     QWidget* buildExplorerPage();
     QWidget* buildHeaderBar(QWidget* parent, bool showOpenButton);
 
+    void addRecentFile(const QString& path);
+    void refreshRecentUi();
+    void restoreUiState();
+    void saveUiState();
+
     void populateTree();
     void buildTypeChildren(QStandardItem* typeItem, int typeIndex);
     void buildGroupChildren(QStandardItem* groupItem);
     void setupInteractions();
     void showContextMenu(const QPoint& p);
+    void showSnippetDialog(int typeIndex, int memberIndex, const QString& templateName = QString());
+    void updateDetailsPanel(const QModelIndex& srcIdx);
+    QString buildSnippetText(int typeIndex, int memberIndex, const QString& templateName = QString()) const;
+    void navigateToTypeOrMember(int typeIndex, int memberIndex, MemberKind memberKind);
     void copyTextToClipboard(const QString& text, const QString& statusMsg);
     void startParseAsync(const QString& path);
     void finishParseAsync();
@@ -58,10 +77,22 @@ private:
     QWidget* explorerPage_ = nullptr;
     class QPushButton* openBtn_ = nullptr;
     class QPushButton* compareBtn_ = nullptr;
+    QListWidget* recentList_ = nullptr;
     QTreeView* tree_ = nullptr;
     QLineEdit* search_ = nullptr;
-    QPlainTextEdit* details_ = nullptr;
+    QTabWidget* detailsTabs_ = nullptr;
+    QPlainTextEdit* detailsSummary_ = nullptr;
+    QPlainTextEdit* detailsRaw_ = nullptr;
+    class QPushButton* copyRvaBtn_ = nullptr;
+    class QPushButton* copyOffBtn_ = nullptr;
+    class QPushButton* copyVaBtn_ = nullptr;
+    class QPushButton* copySnippetBtn_ = nullptr;
+    class QPushButton* exportJsonBtn_ = nullptr;
+    class QPushButton* exportCsvBtn_ = nullptr;
     QLineEdit* resultsSearch_ = nullptr;
+    QComboBox* resultsScope_ = nullptr;
+    QListWidget* favoritesList_ = nullptr;
+    QLabel* favoritesCount_ = nullptr;
     QListWidget* resultsList_ = nullptr;
     QLabel* resultsCount_ = nullptr;
     QCheckBox* filterNs_ = nullptr;
@@ -98,6 +129,8 @@ private:
         enum class Kind { Namespace, Type, Member } kind;
         QString display;
         QString detail;
+        QString haystack;
+        QString assembly;
         QString ns;
         int typeIndex = -1;
         int memberIndex = -1;
@@ -105,7 +138,32 @@ private:
     };
 
     std::vector<SearchEntry> searchIndex_;
-    QStandardItem* nsRootItem_ = nullptr;
+    QStandardItem* asmRootItem_ = nullptr;
     std::vector<QStandardItem*> typeItems_;
+    std::map<std::string, QStandardItem*> asmItems_;
     std::map<std::string, QStandardItem*> nsItems_;
+
+    QMap<QString, QString> snippetTemplates_;
+    QString snippetDefaultTemplateName_;
+
+    QFutureWatcher<QVector<int>>* resultsFilterWatcher_ = nullptr;
+    int resultsFilterRequestId_ = 0;
+
+    QSet<QString> favoriteKeys_;
+
+    int selectedTypeIndex_ = -1;
+    int selectedMemberIndex_ = -1;
+    MemberKind selectedMemberKind_ = MemberKind::Method;
+
+    QString selectedSignature_;
+    QString selectedRva_;
+    QString selectedOffset_;
+    QString selectedVa_;
+    QString selectedFqn_;
+    QString selectedSnippet_;
+
+    QTimer* resultsFilterTimer_ = nullptr;
+
+    QSplitter* mainSplitter_ = nullptr;
+    QSplitter* rightSplitter_ = nullptr;
 };

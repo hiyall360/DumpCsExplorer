@@ -110,6 +110,7 @@ private:
     QProgressBar* busyBar_ = nullptr;
     QFutureWatcher<std::vector<DumpType>>* watcher_ = nullptr;
     QString parsePath_;
+    QString parseError_;
     bool hasLoadedPrimary_ = false;
 
     QIcon icoNamespace_;
@@ -129,7 +130,6 @@ private:
         enum class Kind { Namespace, Type, Member } kind;
         QString display;
         QString detail;
-        QString haystack;
         QString assembly;
         QString ns;
         int typeIndex = -1;

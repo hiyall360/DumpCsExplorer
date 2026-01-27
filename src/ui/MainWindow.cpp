@@ -49,6 +49,7 @@
 #include <QColor>
 #include <QStyledItemDelegate>
 #include <QRegularExpression>
+#include <QFontMetrics>
 #include <QFontMetricsF>
 #include <QPainter>
 #include <QPointF>
@@ -75,10 +76,59 @@ static bool groupMatches(MemberKind mk, const QString& groupKey) {
     return false;
 }
 
+static QString bestMemberNameForSnippet(const DumpMember& m) {
+    const QString explicitName = QString::fromStdString(m.name).trimmed();
+    if (!explicitName.isEmpty())
+        return explicitName;
+
+    const QString sig = QString::fromStdString(m.signature);
+
+    if (m.kind == MemberKind::Field || m.kind == MemberKind::EnumValue) {
+        static const QRegularExpression rx(R"(\b([A-Za-z_][A-Za-z0-9_]*)\b\s*(?:;|=))");
+        const auto mm = rx.match(sig);
+        if (mm.hasMatch())
+            return mm.captured(1);
+    }
+
+    if (m.kind == MemberKind::Property) {
+        static const QRegularExpression rx(R"(\b([A-Za-z_][A-Za-z0-9_]*)\b\s*\{)");
+        const auto mm = rx.match(sig);
+        if (mm.hasMatch())
+            return mm.captured(1);
+    }
+
+    if (m.kind == MemberKind::Event) {
+        static const QRegularExpression rx(R"(\bevent\s+[^\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\b)");
+        const auto mm = rx.match(sig);
+        if (mm.hasMatch())
+            return mm.captured(1);
+    }
+
+    return explicitName;
+}
+
 static QString defaultSnippetTemplateBnm() {
     return
         "auto clazz = BNM::Class(\"${namespace}\", \"${className}\");\n"
         "auto method = clazz.GetMethod(\"${methodName}\", ${parameterCount});\n";
+}
+
+static QString defaultSnippetTemplateBnmField() {
+    return
+        "auto clazz = BNM::Class(\"${namespace}\", \"${className}\");\n"
+        "auto field = clazz.GetField(\"${fieldName}\");\n";
+}
+
+static QString defaultSnippetTemplateBnmProperty() {
+    return
+        "auto clazz = BNM::Class(\"${namespace}\", \"${className}\");\n"
+        "auto prop = clazz.GetProperty(\"${propertyName}\");\n";
+}
+
+static QString defaultSnippetTemplateBnmEvent() {
+    return
+        "auto clazz = BNM::Class(\"${namespace}\", \"${className}\");\n"
+        "auto evt = clazz.GetEvent(\"${eventName}\");\n";
 }
 
 static QString defaultSnippetTemplateFrida() {
@@ -148,7 +198,9 @@ static QStringList extractSnippetPlaceholders(const QString& tpl) {
 
 static QStringList validateSnippetPlaceholders(const QString& tpl) {
     static const QStringList allowed = {
-        "${assemblyName}", "${assembly}", "${namespace}", "${className}", "${methodName}", "${parameterCount}"
+        "${assemblyName}", "${assembly}", "${namespace}", "${className}",
+        "${memberName}", "${methodName}", "${parameterCount}",
+        "${fieldName}", "${propertyName}", "${eventName}"
     };
 
     QStringList bad;
@@ -422,6 +474,14 @@ private:
 void MainWindow::buildSearchIndex() {
     searchIndex_.clear();
 
+    size_t totalMembers = 0;
+    for (const auto& t : types_)
+        totalMembers += t.members.size();
+
+    const bool indexMembers = totalMembers <= 250000;
+    if (!indexMembers)
+        statusBar()->showMessage("Large file detected: member search index disabled to prevent crashes (types/namespaces only)", 6000);
+
     for (const auto& [key, item] : nsItems_) {
         (void)item;
         const auto pos = key.find('|');
@@ -434,7 +494,6 @@ void MainWindow::buildSearchIndex() {
         e.ns = QString::fromStdString(nsName);
         e.display = e.ns;
         e.detail = (e.assembly.isEmpty() ? QString() : (e.assembly + " :: ")) + e.ns;
-        e.haystack = (e.display + "\n" + e.detail).toLower();
         searchIndex_.push_back(e);
     }
 
@@ -448,24 +507,24 @@ void MainWindow::buildSearchIndex() {
         const QString typeFqn = QString::fromStdString(t.nameSpace + "::" + t.name);
         e.display = QString::fromStdString(t.name);
         e.detail = (e.assembly.isEmpty() ? QString() : (e.assembly + " :: ")) + typeFqn;
-        e.haystack = (e.display + "\n" + e.detail).toLower();
         searchIndex_.push_back(e);
 
-        for (int mi = 0; mi < (int)t.members.size(); ++mi) {
-            const auto& m = t.members[(size_t)mi];
-            SearchEntry em;
-            em.kind = SearchEntry::Kind::Member;
-            em.assembly = QString::fromStdString(t.assembly);
-            em.ns = QString::fromStdString(t.nameSpace);
-            em.typeIndex = ti;
-            em.memberIndex = mi;
-            em.memberKind = m.kind;
-            const QString memberDisp = QString::fromStdString(t.name + "  " + m.signature);
-            const QString memberFqn = QString::fromStdString(t.nameSpace + "::" + t.name + "  " + m.signature);
-            em.display = memberDisp;
-            em.detail = (em.assembly.isEmpty() ? QString() : (em.assembly + " :: ")) + memberFqn + "\n" + QString::fromStdString(m.details);
-            em.haystack = (em.display + "\n" + em.detail).toLower();
-            searchIndex_.push_back(em);
+        if (indexMembers) {
+            for (int mi = 0; mi < (int)t.members.size(); ++mi) {
+                const auto& m = t.members[(size_t)mi];
+                SearchEntry em;
+                em.kind = SearchEntry::Kind::Member;
+                em.assembly = QString::fromStdString(t.assembly);
+                em.ns = QString::fromStdString(t.nameSpace);
+                em.typeIndex = ti;
+                em.memberIndex = mi;
+                em.memberKind = m.kind;
+                const QString memberDisp = QString::fromStdString(t.name + "  " + m.signature);
+                const QString memberFqn = QString::fromStdString(t.nameSpace + "::" + t.name + "  " + m.signature);
+                em.display = memberDisp;
+                em.detail = (em.assembly.isEmpty() ? QString() : (em.assembly + " :: ")) + memberFqn;
+                searchIndex_.push_back(em);
+            }
         }
     }
 }
@@ -474,7 +533,7 @@ void MainWindow::updateSearchResults() {
     if (!resultsList_ || !resultsSearch_)
         return;
 
-    const QString q = resultsSearch_->text().trimmed().toLower();
+    const QString q = resultsSearch_->text().trimmed();
 
     const bool allowNs = filterNs_ && filterNs_->isChecked();
     const bool allowType = filterType_ && filterType_->isChecked();
@@ -620,6 +679,7 @@ void MainWindow::updateSearchResults() {
             return out;
         }
 
+        const QString qTrim = q.trimmed();
         for (int i = 0; i < (int)indexSnapshot->size(); ++i) {
             const auto& e = (*indexSnapshot)[(size_t)i];
 
@@ -650,8 +710,11 @@ void MainWindow::updateSearchResults() {
                     continue;
             }
 
-            if (!q.isEmpty() && !e.haystack.contains(q))
-                continue;
+            if (!qTrim.isEmpty()) {
+                const bool hit = e.display.contains(qTrim, Qt::CaseInsensitive) || e.detail.contains(qTrim, Qt::CaseInsensitive);
+                if (!hit)
+                    continue;
+            }
 
             out.push_back(i);
         }
@@ -745,12 +808,20 @@ void MainWindow::navigateToSearchResult(QListWidgetItem* item) {
             }
 
             const QString display = QString::fromStdString(m.signature);
-            const QString detail  = QString::fromStdString(m.details);
 
             const QString sig = QString::fromStdString(m.signature);
             const QString rva = QString("0x%1").arg(QString::number((qulonglong)m.rva, 16));
             const QString off = QString("0x%1").arg(QString::number((qulonglong)m.offset, 16));
             const QString va  = QString("0x%1").arg(QString::number((qulonglong)m.va, 16));
+
+            QString detail;
+            if (m.kind == MemberKind::Method || m.kind == MemberKind::Ctor) {
+                detail = sig + "\n" + "RVA: " + rva + "  Offset: " + off + "  VA: " + va;
+            } else if (m.kind == MemberKind::Field || m.kind == MemberKind::Property || m.kind == MemberKind::Event) {
+                detail = sig + "\n" + "Offset: " + off;
+            } else {
+                detail = sig;
+            }
 
             auto* it = new QStandardItem(display);
             it->setIcon(childIcon);
@@ -986,12 +1057,10 @@ QString MainWindow::buildSnippetText(int typeIndex, int memberIndex, const QStri
         return {};
 
     const auto& m = t.members[(size_t)memberIndex];
-    if (!(m.kind == MemberKind::Method || m.kind == MemberKind::Ctor))
-        return {};
 
     const QString clazz = QString::fromStdString(t.name);
-    const QString method = QString::fromStdString(m.name);
-    const int argc = countParamsTopLevel(m.params);
+    const QString memberName = bestMemberNameForSnippet(m);
+    const int argc = m.paramCount;
 
     QString assembly = QString::fromStdString(t.assembly);
     if (assembly.isEmpty())
@@ -1005,8 +1074,12 @@ QString MainWindow::buildSnippetText(int typeIndex, int memberIndex, const QStri
     vars.insert("${assembly}", assembly);
     vars.insert("${namespace}", nsForSnippet);
     vars.insert("${className}", clazz);
-    vars.insert("${methodName}", method);
+    vars.insert("${memberName}", memberName);
+    vars.insert("${methodName}", memberName);
     vars.insert("${parameterCount}", QString::number(argc));
+    vars.insert("${fieldName}", (m.kind == MemberKind::Field) ? memberName : QString());
+    vars.insert("${propertyName}", (m.kind == MemberKind::Property) ? memberName : QString());
+    vars.insert("${eventName}", (m.kind == MemberKind::Event) ? memberName : QString());
 
     QString chosen = templateName;
     if (chosen.isEmpty())
@@ -1014,9 +1087,29 @@ QString MainWindow::buildSnippetText(int typeIndex, int memberIndex, const QStri
     if (chosen.isEmpty() || !snippetTemplates_.contains(chosen))
         chosen = snippetTemplates_.isEmpty() ? QString() : snippetTemplates_.firstKey();
 
-    QString tpl = snippetTemplates_.value(chosen);
-    if (tpl.isEmpty())
-        tpl = defaultSnippetTemplateBnm();
+    QString tpl;
+    if (chosen == "BNM") {
+        if (m.kind == MemberKind::Field)
+            tpl = defaultSnippetTemplateBnmField();
+        else if (m.kind == MemberKind::Property)
+            tpl = defaultSnippetTemplateBnmProperty();
+        else if (m.kind == MemberKind::Event)
+            tpl = defaultSnippetTemplateBnmEvent();
+        else
+            tpl = defaultSnippetTemplateBnm();
+    } else {
+        tpl = snippetTemplates_.value(chosen);
+        if (tpl.isEmpty()) {
+            if (m.kind == MemberKind::Field)
+                tpl = defaultSnippetTemplateBnmField();
+            else if (m.kind == MemberKind::Property)
+                tpl = defaultSnippetTemplateBnmProperty();
+            else if (m.kind == MemberKind::Event)
+                tpl = defaultSnippetTemplateBnmEvent();
+            else
+                tpl = defaultSnippetTemplateBnm();
+        }
+    }
 
     return applySnippetTemplate(tpl, vars);
 }
@@ -1082,7 +1175,9 @@ void MainWindow::updateDetailsPanel(const QModelIndex& srcIdx) {
         selectedFqn_ += "::" + memberName;
 
     if (selectedTypeIndex_ >= 0 && selectedMemberIndex_ >= 0 &&
-        (selectedMemberKind_ == MemberKind::Method || selectedMemberKind_ == MemberKind::Ctor)) {
+        (selectedMemberKind_ == MemberKind::Method || selectedMemberKind_ == MemberKind::Ctor ||
+         selectedMemberKind_ == MemberKind::Field || selectedMemberKind_ == MemberKind::Property ||
+         selectedMemberKind_ == MemberKind::Event)) {
         selectedSnippet_ = buildSnippetText(selectedTypeIndex_, selectedMemberIndex_);
     }
 
@@ -1174,6 +1269,9 @@ void MainWindow::buildUi() {
         "QPushButton { background-color: #134046; border: 1px solid #1a5860; border-radius: 6px; padding: 8px 12px; }\n"
         "QPushButton:hover { background-color: #1a5560; }\n"
         "QPushButton:pressed { background-color: #1b7a3b; border-color: #1b7a3b; }\n"
+        "QMenu { background-color: #0b2a2d; border: 1px solid #124448; }\n"
+        "QMenu::item { padding: 6px 32px 6px 12px; }\n"
+        "QMenu::item:selected { background-color: #1b7a3b; }\n"
         "QCheckBox { spacing: 6px; }\n"
         "QCheckBox::indicator { width: 14px; height: 14px; }\n"
         "QCheckBox::indicator:unchecked { border: 1px solid #1a5860; background: #0b2a2d; border-radius: 3px; }\n"
@@ -1542,15 +1640,25 @@ QWidget* MainWindow::buildExplorerPage() {
     favHeader->setContentsMargins(0, 0, 0, 0);
     favHeader->setSpacing(6);
     auto* favTitle = new QLabel("Favorites", favoritesCard);
+    auto* favClearBtn = new QPushButton("Clear", favoritesCard);
+    favClearBtn->setFixedHeight(28);
+    favClearBtn->setMinimumWidth(QFontMetrics(favClearBtn->font()).horizontalAdvance("Clear") + 20);
     favoritesCount_ = new QLabel("0", favoritesCard);
     favHeader->addWidget(favTitle);
     favHeader->addStretch(1);
+    favHeader->addWidget(favClearBtn);
     favHeader->addWidget(favoritesCount_);
     favoritesLay->addLayout(favHeader);
 
     favoritesList_ = new QListWidget(favoritesCard);
     favoritesList_->setUniformItemSizes(true);
     favoritesLay->addWidget(favoritesList_, 1);
+
+    connect(favClearBtn, &QPushButton::clicked, this, [this]() {
+        favoriteKeys_.clear();
+        if (favoritesList_) favoritesList_->clear();
+        if (favoritesCount_) favoritesCount_->setText("0");
+    });
 
     auto* resultsCard = new QFrame(rightSplitter);
     resultsCard->setObjectName("Card");
@@ -1754,6 +1862,49 @@ void MainWindow::setupInteractions() {
         };
         connect(favoritesList_, &QListWidget::itemActivated, this, navFav);
         connect(favoritesList_, &QListWidget::itemClicked, this, navFav);
+
+        favoritesList_->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(favoritesList_, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+            if (!favoritesList_)
+                return;
+
+            QListWidgetItem* item = favoritesList_->itemAt(pos);
+            QMenu menu(this);
+
+            if (item) {
+                const QString favKey = item->data(Qt::UserRole).toString();
+                if (!favKey.isEmpty()) {
+                    menu.addAction("Remove from Favorites", this, [this, favKey]() {
+                        favoriteKeys_.remove(favKey);
+                        if (favoritesList_) {
+                            for (int i = favoritesList_->count() - 1; i >= 0; --i) {
+                                auto* it = favoritesList_->item(i);
+                                if (it && it->data(Qt::UserRole).toString() == favKey) {
+                                    delete favoritesList_->takeItem(i);
+                                    break;
+                                }
+                            }
+                        }
+                        if (favoritesCount_)
+                            favoritesCount_->setText(QString::number(favoritesList_ ? favoritesList_->count() : favoriteKeys_.size()));
+                    });
+                }
+            }
+
+            if (!favoriteKeys_.isEmpty()) {
+                if (!menu.actions().isEmpty())
+                    menu.addSeparator();
+                menu.addAction("Clear All", this, [this]() {
+                    favoriteKeys_.clear();
+                    if (favoritesList_) favoritesList_->clear();
+                    if (favoritesCount_) favoritesCount_->setText("0");
+                });
+            }
+
+            if (menu.actions().isEmpty())
+                return;
+            menu.exec(favoritesList_->viewport()->mapToGlobal(pos));
+        });
     }
 
     auto connectFilter = [this](QCheckBox* cb) {
@@ -1904,7 +2055,9 @@ void MainWindow::showContextMenu(const QPoint& p) {
         menu.addAction("Copy VA", this, [this, va]() { copyTextToClipboard(va, "Copied VA: " + va); });
 
     if (hasMemberIndex && typeIndex >= 0 && memberIndex >= 0 &&
-        (memberKind == (int)MemberKind::Method || memberKind == (int)MemberKind::Ctor)) {
+        (memberKind == (int)MemberKind::Method || memberKind == (int)MemberKind::Ctor ||
+         memberKind == (int)MemberKind::Field || memberKind == (int)MemberKind::Property ||
+         memberKind == (int)MemberKind::Event)) {
         QMenu* gen = menu.addMenu("Generate Snippet");
 
         const QString defName = snippetDefaultTemplateName_;
@@ -1943,12 +2096,13 @@ void MainWindow::showSnippetDialog(int typeIndex, int memberIndex, const QString
         return;
 
     const auto& m = t.members[(size_t)memberIndex];
-    if (!(m.kind == MemberKind::Method || m.kind == MemberKind::Ctor))
+    if (!(m.kind == MemberKind::Method || m.kind == MemberKind::Ctor || m.kind == MemberKind::Field ||
+          m.kind == MemberKind::Property || m.kind == MemberKind::Event))
         return;
 
     const QString clazz = QString::fromStdString(t.name);
-    const QString method = QString::fromStdString(m.name);
-    const int argc = countParamsTopLevel(m.params);
+    const QString memberName = bestMemberNameForSnippet(m);
+    const int argc = m.paramCount;
 
     QString assembly = QString::fromStdString(t.assembly);
     if (assembly.isEmpty())
@@ -1962,8 +2116,12 @@ void MainWindow::showSnippetDialog(int typeIndex, int memberIndex, const QString
     vars.insert("${assembly}", assembly);
     vars.insert("${namespace}", nsForSnippet);
     vars.insert("${className}", clazz);
-    vars.insert("${methodName}", method);
+    vars.insert("${memberName}", memberName);
+    vars.insert("${methodName}", memberName);
     vars.insert("${parameterCount}", QString::number(argc));
+    vars.insert("${fieldName}", (m.kind == MemberKind::Field) ? memberName : QString());
+    vars.insert("${propertyName}", (m.kind == MemberKind::Property) ? memberName : QString());
+    vars.insert("${eventName}", (m.kind == MemberKind::Event) ? memberName : QString());
 
     QString currentTemplateName = templateName;
     if (currentTemplateName.isEmpty())
@@ -1971,10 +2129,30 @@ void MainWindow::showSnippetDialog(int typeIndex, int memberIndex, const QString
     if (currentTemplateName.isEmpty() || !snippetTemplates_.contains(currentTemplateName))
         currentTemplateName = snippetTemplates_.isEmpty() ? QString() : snippetTemplates_.firstKey();
 
-    auto buildSnippet = [this, vars](const QString& tplName) {
-        QString tpl = snippetTemplates_.value(tplName);
-        if (tpl.isEmpty())
-            tpl = defaultSnippetTemplateBnm();
+    auto buildSnippet = [this, vars, kind = m.kind](const QString& tplName) {
+        QString tpl;
+        if (tplName == "BNM") {
+            if (kind == MemberKind::Field)
+                tpl = defaultSnippetTemplateBnmField();
+            else if (kind == MemberKind::Property)
+                tpl = defaultSnippetTemplateBnmProperty();
+            else if (kind == MemberKind::Event)
+                tpl = defaultSnippetTemplateBnmEvent();
+            else
+                tpl = defaultSnippetTemplateBnm();
+        } else {
+            tpl = snippetTemplates_.value(tplName);
+            if (tpl.isEmpty()) {
+                if (kind == MemberKind::Field)
+                    tpl = defaultSnippetTemplateBnmField();
+                else if (kind == MemberKind::Property)
+                    tpl = defaultSnippetTemplateBnmProperty();
+                else if (kind == MemberKind::Event)
+                    tpl = defaultSnippetTemplateBnmEvent();
+                else
+                    tpl = defaultSnippetTemplateBnm();
+            }
+        }
         return applySnippetTemplate(tpl, vars);
     };
 
@@ -1982,7 +2160,7 @@ void MainWindow::showSnippetDialog(int typeIndex, int memberIndex, const QString
 
     auto* dlg = new QDialog(this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
-    dlg->setWindowTitle(QString("Snippet: %1::%2").arg(clazz, method));
+    dlg->setWindowTitle(QString("Snippet: %1::%2").arg(clazz, memberName));
     dlg->resize(760, 260);
 
     auto* lay = new QVBoxLayout(dlg);
@@ -2105,11 +2283,15 @@ void MainWindow::showSnippetDialog(int typeIndex, int memberIndex, const QString
 
         auto* info = new QLabel(
             "Available variables:\n"
-            "  ${assemblyName} (or ${assembly})\n"
+            "  ${assemblyName}\n"
+            "  ${assembly}\n"
             "  ${namespace}\n"
             "  ${className}\n"
             "  ${methodName}\n"
-            "  ${parameterCount}",
+            "  ${parameterCount}\n"
+            "  ${fieldName}\n"
+            "  ${propertyName}\n"
+            "  ${eventName}",
             &tdlg);
         info->setTextInteractionFlags(Qt::TextSelectableByMouse);
         right->addWidget(info);
@@ -2449,7 +2631,7 @@ void MainWindow::compareDumpCs() {
                     e.typeFqn = typeFqn;
                     e.kind = m.kind;
                     e.name = QString::fromStdString(m.name);
-                    e.paramCount = countParamsTopLevel(m.params);
+                    e.paramCount = m.paramCount;
                     e.signature = QString::fromStdString(m.signature);
                     e.sigKey = normalizeSignature(m);
                     e.offset = (quint64)m.offset;
@@ -2971,25 +3153,55 @@ void MainWindow::startParseAsync(const QString& path) {
     parsePath_ = path;
     stack_->setCurrentWidget(explorerPage_);
 
+    parseError_.clear();
+
     addRecentFile(path);
     refreshRecentUi();
 
     setBusy(true, "Parsing: " + path);
 
     auto future = QtConcurrent::run([this, path]() {
-        DumpCsParser::setProgressCallback([this](int pct) {
-            QMetaObject::invokeMethod(this, [this, pct]() {
-                if (busyBar_) busyBar_->setValue(pct);
-            }, Qt::QueuedConnection);
-        });
+        try {
+            DumpCsParser::setProgressCallback([this](int pct) {
+                QMetaObject::invokeMethod(this, [this, pct]() {
+                    if (busyBar_) busyBar_->setValue(pct);
+                }, Qt::QueuedConnection);
+            });
 
-        return DumpCsParser::parse(path.toStdString());
+            return DumpCsParser::parse(path.toStdString());
+        } catch (const std::exception& ex) {
+            const QString msg = QString::fromUtf8(ex.what());
+            QMetaObject::invokeMethod(this, [this, msg]() {
+                parseError_ = msg;
+            }, Qt::BlockingQueuedConnection);
+            return std::vector<DumpType>{};
+        } catch (...) {
+            const QString msg = "Unknown error";
+            QMetaObject::invokeMethod(this, [this, msg]() {
+                parseError_ = msg;
+            }, Qt::BlockingQueuedConnection);
+            return std::vector<DumpType>{};
+        }
     });
     watcher_->setFuture(future);
 }
 
 void MainWindow::finishParseAsync() {
     types_ = watcher_->result();
+
+    if (types_.empty() && !parseError_.isEmpty()) {
+        hasLoadedPrimary_ = false;
+        if (compareBtn_) {
+            compareBtn_->setVisible(false);
+            compareBtn_->setEnabled(false);
+        }
+
+        setBusy(false);
+        QMessageBox::critical(this, "Failed to load dump.cs", "Parsing failed: " + parseError_);
+        statusBar()->showMessage("Failed to load: " + parsePath_, 4000);
+        stack_->setCurrentWidget(welcomePage_);
+        return;
+    }
 
     favoriteKeys_.clear();
     if (favoritesList_) favoritesList_->clear();
@@ -3183,12 +3395,20 @@ void MainWindow::buildGroupChildren(QStandardItem* groupItem) {
         any = true;
 
         const QString display = QString::fromStdString(m.signature);
-        const QString detail  = QString::fromStdString(m.details);
 
         const QString sig = QString::fromStdString(m.signature);
         const QString rva = QString("0x%1").arg(QString::number((qulonglong)m.rva, 16));
         const QString off = QString("0x%1").arg(QString::number((qulonglong)m.offset, 16));
         const QString va  = QString("0x%1").arg(QString::number((qulonglong)m.va, 16));
+
+        QString detail;
+        if (m.kind == MemberKind::Method || m.kind == MemberKind::Ctor) {
+            detail = sig + "\n" + "RVA: " + rva + "  Offset: " + off + "  VA: " + va;
+        } else if (m.kind == MemberKind::Field || m.kind == MemberKind::Property || m.kind == MemberKind::Event) {
+            detail = sig + "\n" + "Offset: " + off;
+        } else {
+            detail = sig;
+        }
 
         auto* it = new QStandardItem(display);
         it->setIcon(childIcon);

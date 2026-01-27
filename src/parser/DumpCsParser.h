@@ -18,16 +18,11 @@ struct DumpMember {
 
     std::string name;
     std::string signature;
-    std::string details;
-    std::string returnType;
-    std::string params;
-    std::string modifiers;
+    int paramCount = 0;
 
     uint64_t rva = 0;
     uint64_t offset = 0;
     uint64_t va = 0;
-
-    std::string enumValue;
 };
 
 struct DumpType {
